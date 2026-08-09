@@ -1,0 +1,6 @@
+{
+    "hidden_dim": 32,
+    "num_layers": 3,
+    "use_mlp_head": true,
+    "learning_rate": 0.0019061403627067385
+}

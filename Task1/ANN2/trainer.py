@@ -5,8 +5,12 @@ import time
 import datetime
 import optuna
 
-def train_model(model, train_loader, val_loader, num_epochs, learning_rate, device, save_path='best_noe_gru_model.pth', optuna_trial=None):
-    criterion = nn.MSELoss()
+def train_model(model, train_loader, val_loader, num_epochs, learning_rate, device, save_path='best_noe_gru_model.pth', optuna_trial=None, loss_type='MSE', use_teacher_forcing=False, tf_decay_factor=0.5):
+    if loss_type == 'Huber':
+        criterion = nn.HuberLoss()
+    else:
+        criterion = nn.MSELoss()
+        
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
     
     train_losses = []
@@ -20,6 +24,13 @@ def train_model(model, train_loader, val_loader, num_epochs, learning_rate, devi
     for epoch in range(num_epochs):
         epoch_start_time = time.time()
         
+        # --- Teacher Forcing Decay ---
+        if use_teacher_forcing:
+            # Decay from 1.0 to 0.0 over the specified fraction of epochs
+            tf_ratio = max(0.0, 1.0 - (epoch / max(1, (num_epochs * tf_decay_factor))))
+        else:
+            tf_ratio = 0.0
+            
         model.train()
         running_train_loss = 0.0
         
@@ -30,7 +41,7 @@ def train_model(model, train_loader, val_loader, num_epochs, learning_rate, devi
             y_init = y_seq[:, 0, :] 
             
             optimizer.zero_grad()
-            y_pred_seq = model(u_seq, y_init)
+            y_pred_seq = model(u_seq, y_init, y_true_seq=y_seq, teacher_forcing_ratio=tf_ratio)
             loss = criterion(y_pred_seq, y_seq)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
@@ -90,7 +101,8 @@ def train_model(model, train_loader, val_loader, num_epochs, learning_rate, devi
               
         if avg_val_loss < best_val_loss:
             best_val_loss = avg_val_loss
-            torch.save(model.state_dict(), save_path)
+            if save_path is not None:
+                torch.save(model.state_dict(), save_path)
             
     total_duration = str(datetime.timedelta(seconds=int(time.time() - global_start_time)))
     print(f"Training Complete! Total time: {total_duration}")

@@ -1,0 +1,5 @@
+--- Final RMSE Results (TF_Experiment) ---
+No_TF_16units       : 0.0331 rad
+TF_Decay_25_16units : 0.0374 rad
+TF_Decay_50_16units : 0.0360 rad
+TF_Decay_75_16units : 0.0408 rad

@@ -6,17 +6,27 @@ def calculate_custom_reward(state, action, w_energy, w_position, w_balance, w_st
     
     position_reward = -cos_th 
     
-    E_kin = 0.5 * (omega ** 2)
-    E_pot = position_reward * 100.0 
+    M = 0.07618
+    g = 9.80155
+    L = 0.04206
+    J = 0.00024421
+    
+    # Energy in Joules
+    E_kin = 0.5 * J * (omega ** 2)
+    E_pot = -M * g * L * cos_th
     E_current = E_kin + E_pot
     
-    E_target = 100.0 
-    energy_penalty = -abs(E_current - E_target) / 100.0 
+    # Target energy (upright, at rest)
+    E_target = M * g * L
+    
+    # Normalize penalty by max possible energy difference (bottom to top)
+    energy_penalty = -abs(E_current - E_target) / (2 * E_target)
     
     # --- Strict Speed Limit for "Unnecessary Kinetic Energy" ---
-    # We allow a 10% margin above E_target (110.0) before aggressively penalizing
-    E_excess = max(0.0, E_current - 110.0)
-    excess_penalty = -(E_excess ** 2) / 1000.0
+    # We allow a 10% margin above E_target before aggressively penalizing
+    E_excess = max(0.0, E_current - 1.1 * E_target)
+    # Normalize excess penalty quadratically
+    excess_penalty = -(E_excess / E_target) ** 2
     energy_penalty += excess_penalty 
     
     if cos_th < -0.8: 

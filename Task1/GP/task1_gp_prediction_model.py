@@ -21,6 +21,9 @@ RESTARTS = 0
 (u_train, th_train), (u_test, th_test) = load_traintest(DATA_PATH)
 model = GPNarxModel(NA, NB, use_trig=USE_TRIG, num_inducing=NUM_INDUCING)
 model.fit(u_train, th_train, restarts=RESTARTS)
+print("\n--- GP MODEL INFO AND LENGTH SCALES ---")
+print(np.asarray(model.m.sum.rbf.lengthscale))
+print("---------------------------------------\n")
 
 # ---------------- evaluate one-step-ahead prediction on held-out test ------
 Xte, Yte = create_IO_data(u_test, th_test, NA, NB, USE_TRIG)
