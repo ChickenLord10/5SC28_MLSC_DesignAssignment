@@ -1,67 +1,111 @@
 """
-Task 1 -- SIMULATION hyperparameter sweep.
-Imports the shared model from gp_core (same model gp_simulation.py submits with),
-loops over na/nb/num_inducing, and reports FREE-RUN SIMULATION RMSE only.
-Produces task1_sweep_simulation.{csv,json}. Pick a good row, then compare with
-the prediction sweep to choose a compromise na/nb for both submission scripts.
+Task 1 -- SIMULATION hyperparameter sweep with Optuna.
+Imports the shared model from gp_core (same model gp_simulation.py submits with).
+Uses Optuna to find the best na/nb configuration.
 """
-import json
-import itertools
-from gp_core import GPNarxModel, rmse, load_traintest
+import optuna
+import os
+import time
+from gp_core import GPNarxModel, create_IO_data, rmse, load_traintest
 
 # ---------------- config ----------------------------------------------------
-DATA_PATH = '../../gym-unbalanced-disk-master/disc-benchmark-files/training-val-test-data.npz'
-USE_TRIG  = True
+DATA_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), '../../gym-unbalanced-disk-master/disc-benchmark-files/training-val-test-data.npz')
+USE_TRIG  = False
 RESTARTS  = 0
+NUM_INDUCING = 200
 
-NA_GRID       = [2, 3, 4, 5]
-NB_GRID       = [2, 3, 4, 5]
-INDUCING_GRID = [200, 500]
-COUPLE_NA_NB  = True     # True: only na==nb. False: full grid.
+# We'll need a wrapper objective that accepts optuna trial
+class Objective:
+    def __init__(self, u_train, th_train, u_test, th_test):
+        self.u_train = u_train
+        self.th_train = th_train
+        self.u_test = u_test
+        self.th_test = th_test
 
-# ---------------- sweep -----------------------------------------------------
-def evaluate(na, nb, ni, u_train, th_train, u_test, th_test):
-    model = GPNarxModel(na, nb, use_trig=USE_TRIG, num_inducing=ni)
-    model.fit(u_train, th_train, restarts=RESTARTS)
-    skip = max(na, nb)
-    th_sim = model.simulate(u_test, th_test, skip=skip)
-    return rmse(th_sim[skip:], th_test[skip:])   # (rad, deg)
-
+    def __call__(self, trial):
+        na = trial.suggest_int('na', 2, 10)
+        nb = trial.suggest_int('nb', 2, 10)
+        
+        model = GPNarxModel(na, nb, use_trig=USE_TRIG, num_inducing=NUM_INDUCING)
+        model.fit(self.u_train, self.th_train, restarts=RESTARTS)
+        
+        # Evaluate Prediction
+        Xte, Yte = create_IO_data(self.u_test, self.th_test, na, nb, USE_TRIG)
+        pred_rad, pred_deg = rmse(model.predict_rows(Xte), Yte)
+        
+        # Evaluate Simulation
+        skip = max(na, nb)
+        th_sim = model.simulate(self.u_test, self.th_test, skip=skip)
+        sim_rad, sim_deg = rmse(th_sim[skip:], self.th_test[skip:])
+        
+        # Log both metrics
+        trial.set_user_attr('pred_rms_deg', pred_deg)
+        trial.set_user_attr('sim_rms_deg', sim_deg)
+        
+        # Return Simulation Error for Optuna to minimize
+        return sim_deg
 
 def main():
+    start_time = time.time()
     (u_train, th_train), (u_test, th_test) = load_traintest(DATA_PATH)
     print(f'train points: {len(th_train)}, test points: {len(th_test)}\n')
 
-    combos = ([(a, a, ni) for a in NA_GRID for ni in INDUCING_GRID] if COUPLE_NA_NB
-              else list(itertools.product(NA_GRID, NB_GRID, INDUCING_GRID)))
+    db_path = 'optuna_gp_simulation.db'
+    pred_db_path = 'optuna_gp_prediction.db'
+    
+    if os.path.exists(db_path):
+        os.remove(db_path)
 
-    rows = []
-    header = f"{'na':>3} {'nb':>3} {'induc':>6} | {'sim_rad':>9} {'sim_deg':>9}"
-    print(header); print('-' * len(header))
-    for na, nb, ni in combos:
+    study = optuna.create_study(
+        direction="minimize", 
+        study_name="GP_Simulation_Sweep",
+        storage=f"sqlite:///{db_path}",
+        load_if_exists=True,
+        sampler=optuna.samplers.TPESampler(constant_liar=True)
+    )
+    
+    # --- WARM START LOGIC ---
+    if os.path.exists(pred_db_path):
+        print("Found Prediction database. Warm-starting from its trials...")
         try:
-            sr, sdg = evaluate(na, nb, ni, u_train, th_train, u_test, th_test)
-            print(f"{na:>3} {nb:>3} {ni:>6} | {sr:>9.5f} {sdg:>9.4f}")
-            rows.append({'na': na, 'nb': nb, 'num_inducing': ni,
-                         'sim_rms_rad': sr, 'sim_rms_deg': sdg})
+            pred_study = optuna.load_study(study_name="GP_Prediction_Sweep", storage=f"sqlite:///{pred_db_path}")
+            for t in pred_study.trials:
+                if t.state == optuna.trial.TrialState.COMPLETE:
+                    # For simulation, our objective is the simulation error (sim_rms_deg).
+                    # We saved this as a user attribute in the prediction run!
+                    sim_val = t.user_attrs.get('sim_rms_deg')
+                    pred_val = t.value # The prediction run returned pred_rms_deg
+                    
+                    if sim_val is not None:
+                        study.add_trial(
+                            optuna.trial.create_trial(
+                                params={"na": t.params["na"], "nb": t.params["nb"]},
+                                distributions={
+                                    "na": optuna.distributions.IntDistribution(2, 10),
+                                    "nb": optuna.distributions.IntDistribution(2, 10)
+                                },
+                                value=sim_val,
+                                user_attrs={'pred_rms_deg': pred_val, 'sim_rms_deg': sim_val}
+                            )
+                        )
+            print(f"Successfully warm-started {len(study.trials)} trials!")
         except Exception as e:
-            print(f"{na:>3} {nb:>3} {ni:>6} | FAILED: {e}")
+            print(f"Could not warm-start from prediction database: {e}")
+    else:
+        print("No Prediction database found to warm-start from.")
 
-    if rows:
-        best = min(rows, key=lambda r: r['sim_rms_rad'])
-        print(f"\nBest simulation: na={best['na']} nb={best['nb']} "
-              f"inducing={best['num_inducing']} -> {best['sim_rms_rad']:.5f} rad "
-              f"({best['sim_rms_deg']:.3f} deg)")
+    objective = Objective(u_train, th_train, u_test, th_test)
+    
+    # Run 20 trials across 8 CPU workers
+    study.optimize(objective, n_trials=20, n_jobs=8, show_progress_bar=True)
 
-    with open('task1_sweep_simulation.json', 'w') as fh:
-        json.dump(rows, fh, indent=2)
-    with open('task1_sweep_simulation.csv', 'w') as fh:
-        fh.write('na,nb,num_inducing,sim_rms_rad,sim_rms_deg\n')
-        for r in rows:
-            fh.write(f"{r['na']},{r['nb']},{r['num_inducing']},"
-                     f"{r['sim_rms_rad']:.6f},{r['sim_rms_deg']:.6f}\n")
-    print('\nsaved task1_sweep_simulation.json and .csv')
-
+    print("\n--- Sweep Complete ---")
+    best_trial = study.best_trial
+    print(f"Best Simulation RMSE (deg): {best_trial.value:.4f}")
+    print(f"Best Params: {best_trial.params}")
+    
+    end_time = time.time()
+    print(f"\nTotal Execution Time: {end_time - start_time:.2f} seconds")
 
 if __name__ == '__main__':
     main()

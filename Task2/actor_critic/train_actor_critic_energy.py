@@ -136,7 +136,17 @@ def main() -> None:
                 action = float(np.clip(action, -ACTION_LIMIT, ACTION_LIMIT))
 
             next_obs, _, terminated, truncated, info = env.step(action)
-            reward = swingup_reward(next_obs, action)
+            
+            # CUSTOM ENERGY REWARD
+            theta = float(next_obs[0])
+            omega = float(next_obs[1])
+            top_error = wrap_to_pi(theta - np.pi)
+            upright_score = np.cos(top_error)
+            omega_penalty = 0.01 * (omega / 10.0) ** 2
+            action_penalty = 0.5 * (float(action) / 3.0) ** 2 # HEAVY PENALTY
+            near_top_bonus = 1.0 if abs(top_error) < 0.20 and abs(omega) < 1.0 else 0.0
+            reward = float(upright_score - omega_penalty - action_penalty + near_top_bonus)
+            
             next_state = state_features(next_obs)
             done = bool(terminated or truncated)
             replay.push(Transition(state, action, reward, next_state, done))

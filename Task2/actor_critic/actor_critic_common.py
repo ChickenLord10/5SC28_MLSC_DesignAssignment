@@ -21,32 +21,38 @@ if platform.system() == 'Windows':
 ACTION_LIMIT = 3.0
 
 class Actor(nn.Module):
-    def __init__(self, state_dim: int = 4, action_limit: float = ACTION_LIMIT):
+    def __init__(self, state_dim: int = 4, action_limit: float = ACTION_LIMIT, hidden_dims=[128, 128], activation="relu"):
         super().__init__()
         self.action_limit = action_limit
-        self.net = nn.Sequential(
-            nn.Linear(state_dim, 128),
-            nn.ReLU(),
-            nn.Linear(128, 128),
-            nn.ReLU(),
-            nn.Linear(128, 1),
-            nn.Tanh(),
-        )
+        act_fn = nn.ReLU if activation.lower() == "relu" else nn.Tanh
+        
+        layers = []
+        prev_dim = state_dim
+        for h in hidden_dims:
+            layers.append(nn.Linear(prev_dim, h))
+            layers.append(act_fn())
+            prev_dim = h
+        layers.append(nn.Linear(prev_dim, 1))
+        layers.append(nn.Tanh())
+        self.net = nn.Sequential(*layers)
 
     def forward(self, state: torch.Tensor) -> torch.Tensor:
         return self.action_limit * self.net(state)
 
 
 class Critic(nn.Module):
-    def __init__(self, state_dim: int = 4):
+    def __init__(self, state_dim: int = 4, hidden_dims=[128, 128], activation="relu"):
         super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(state_dim + 1, 128),
-            nn.ReLU(),
-            nn.Linear(128, 128),
-            nn.ReLU(),
-            nn.Linear(128, 1),
-        )
+        act_fn = nn.ReLU if activation.lower() == "relu" else nn.Tanh
+        
+        layers = []
+        prev_dim = state_dim + 1
+        for h in hidden_dims:
+            layers.append(nn.Linear(prev_dim, h))
+            layers.append(act_fn())
+            prev_dim = h
+        layers.append(nn.Linear(prev_dim, 1))
+        self.net = nn.Sequential(*layers)
 
     def forward(self, state: torch.Tensor, action: torch.Tensor) -> torch.Tensor:
         if action.ndim == 1:
@@ -97,7 +103,12 @@ class ActorCriticPolicy(Policy):
         if os.name == "nt":
             pathlib.PosixPath = pathlib.WindowsPath
         checkpoint = torch.load(model_path, map_location="cpu")
-        self.actor = Actor()
+        
+        args = checkpoint.get("args", {})
+        hidden_dims = args.get("hidden_dims", [128, 128])
+        activation = args.get("activation", "relu")
+        
+        self.actor = Actor(hidden_dims=hidden_dims, activation=activation)
         self.actor.load_state_dict(checkpoint["actor"])
         self.actor.eval()
         self.exploration_std = exploration_std

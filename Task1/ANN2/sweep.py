@@ -3,6 +3,7 @@ import torch
 import optuna
 import json
 import datetime
+import time
 import matplotlib.pyplot as plt
 from dataset_handler import prepare_dataloaders
 from model import NOE_GRU
@@ -73,17 +74,25 @@ def objective(trial):
 
 def main():
     print("Starting Optuna Hyperparameter Sweep...")
+    start_time = time.time()
     
     pruner = optuna.pruners.MedianPruner(n_startup_trials=5, n_warmup_steps=5)
     
     # Create an Optuna study object. We want to 'minimize' the validation loss.
+    # Note: SQLite storage is required for multiprocessing with Optuna.
+    db_path = os.path.join(RESULTS_DIR, 'optuna_sweep.db')
     study = optuna.create_study(
         direction="minimize", 
         study_name="NOE_GRU_Sweep",
+        storage=f"sqlite:///{db_path}",
+        load_if_exists=True,
         pruner=pruner # <--- Attach it to the study
     )
     
-    study.optimize(objective, n_trials=20)
+    study.optimize(objective, n_trials=20, n_jobs=8, show_progress_bar=True)
+    
+    end_time = time.time()
+    print(f"\nTotal Sweep Execution Time: {end_time - start_time:.2f} seconds")
     
     # --- Results Logging ---
     print("\n==================================================")

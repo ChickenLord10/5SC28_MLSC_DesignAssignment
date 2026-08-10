@@ -1,0 +1,9 @@
+{
+    "best_val_loss": 0.07104040708739397,
+    "best_params": {
+        "hidden_dim": 16,
+        "batch_size": 32,
+        "seq_length": 150,
+        "learning_rate": 0.0015740123891780913
+    }
+}

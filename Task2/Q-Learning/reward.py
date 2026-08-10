@@ -8,16 +8,16 @@ def calculate_custom_reward(state, action, w_energy, w_position, w_balance, w_st
     
     M = 0.07618
     g = 9.80155
-    L = 0.04206
-    J = 0.00024421
+    r = 0.0410772235841364
+    J = 0.000244210523960356
     
     # Energy in Joules
     E_kin = 0.5 * J * (omega ** 2)
-    E_pot = -M * g * L * cos_th
+    E_pot = -M * g * r * cos_th
     E_current = E_kin + E_pot
     
     # Target energy (upright, at rest)
-    E_target = M * g * L
+    E_target = M * g * r
     
     # Normalize penalty by max possible energy difference (bottom to top)
     energy_penalty = -abs(E_current - E_target) / (2 * E_target)

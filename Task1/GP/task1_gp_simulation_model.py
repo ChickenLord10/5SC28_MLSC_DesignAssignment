@@ -12,7 +12,7 @@ HIDDEN_PATH = '../../gym-unbalanced-disk-master/disc-benchmark-files/hidden-test
 SUBMIT_PATH = '../../gym-unbalanced-disk-master/disc-benchmark-files/hidden-test-simulation-gp-submission-file.npz'
 NA = 5
 NB = 5
-USE_TRIG = True
+USE_TRIG = False
 NUM_INDUCING = 200
 RESTARTS = 0
 
